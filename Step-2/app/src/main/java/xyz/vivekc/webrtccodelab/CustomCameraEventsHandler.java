@@ -20,13 +20,18 @@ public class CustomCameraEventsHandler implements CameraVideoCapturer.CameraEven
     }
 
     @Override
+    public void onCameraDisconnected() {
+        Log.d(logTag, "onCameraDisconnected()");
+    }
+
+    @Override
     public void onCameraFreezed(String s) {
         Log.d(logTag, "onCameraFreezed() called with: s = [" + s + "]");
     }
 
     @Override
-    public void onCameraOpening(int i) {
-        Log.d(logTag, "onCameraOpening() called with: i = [" + i + "]");
+    public void onCameraOpening(String s) {
+        Log.d(logTag, "onCameraOpening() called with: s = [" + s + "]");
     }
 
     @Override

@@ -2,24 +2,24 @@ package xyz.vivekc.webrtccodelab;
 
 import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
-import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 
 import org.webrtc.AudioSource;
 import org.webrtc.AudioTrack;
+import org.webrtc.Camera1Enumerator;
+import org.webrtc.CameraEnumerator;
 import org.webrtc.CameraVideoCapturer;
 import org.webrtc.EglBase;
 import org.webrtc.IceCandidate;
+import org.webrtc.Logging;
 import org.webrtc.MediaConstraints;
 import org.webrtc.MediaStream;
 import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnectionFactory;
-import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
 import org.webrtc.SurfaceViewRenderer;
 import org.webrtc.VideoCapturer;
-import org.webrtc.VideoCapturerAndroid;
 import org.webrtc.VideoRenderer;
 import org.webrtc.VideoSource;
 import org.webrtc.VideoTrack;
@@ -28,6 +28,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class MainActivity extends AppCompatActivity implements View.OnClickListener {
+
+    private String TAG = this.getClass().getCanonicalName();
+
     PeerConnectionFactory peerConnectionFactory;
     MediaConstraints audioConstraints;
     MediaConstraints videoConstraints;
@@ -76,27 +79,44 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         remoteVideoView.setZOrderMediaOverlay(true);
     }
 
+    private VideoCapturer createVideoCapturer(CameraVideoCapturer.CameraEventsHandler eventsHandler) {
+        VideoCapturer videoCapturer;
+        Logging.d(TAG, "Creating capturer using camera1 API.");
+        videoCapturer = createCameraCapturer(new Camera1Enumerator(false), eventsHandler);
 
-    // Cycle through likely device names for the camera and return the first
-    // capturer that works, or crash if none do.
-    private VideoCapturer getVideoCapturer(CameraVideoCapturer.CameraEventsHandler eventsHandler) {
-        String[] cameraFacing = {"front", "back"};
-        int[] cameraIndex = {0, 1};
-        int[] cameraOrientation = {0, 90, 180, 270};
-        for (String facing : cameraFacing) {
-            for (int index : cameraIndex) {
-                for (int orientation : cameraOrientation) {
-                    String name = "Camera " + index + ", Facing " + facing +
-                            ", Orientation " + orientation;
-                    VideoCapturer capturer = VideoCapturerAndroid.create(name, eventsHandler);
-                    if (capturer != null) {
-                        Log.d("Using camera: ", name);
-                        return capturer;
-                    }
+        return videoCapturer;
+    }
+
+    private VideoCapturer createCameraCapturer(CameraEnumerator enumerator, CameraVideoCapturer.CameraEventsHandler eventsHandler) {
+        final String[] deviceNames = enumerator.getDeviceNames();
+
+        // First, try to find front facing camera
+        Logging.d(TAG, "Looking for front facing cameras.");
+        for (String deviceName : deviceNames) {
+            if (enumerator.isFrontFacing(deviceName)) {
+                Logging.d(TAG, "Creating front facing camera capturer.");
+                VideoCapturer videoCapturer = enumerator.createCapturer(deviceName, eventsHandler);
+
+                if (videoCapturer != null) {
+                    return videoCapturer;
                 }
             }
         }
-        throw new RuntimeException("Failed to open capture");
+
+        // Front facing camera not found, try something else
+        Logging.d(TAG, "Looking for other cameras.");
+        for (String deviceName : deviceNames) {
+            if (!enumerator.isFrontFacing(deviceName)) {
+                Logging.d(TAG, "Creating other camera capturer.");
+                VideoCapturer videoCapturer = enumerator.createCapturer(deviceName, eventsHandler);
+
+                if (videoCapturer != null) {
+                    return videoCapturer;
+                }
+            }
+        }
+
+        return null;
     }
 
 
@@ -124,15 +144,15 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         call.setEnabled(true);
         //Initialize PeerConnectionFactory globals.
         //Params are context, initAudio,initVideo and videoCodecHwAcceleration
-        PeerConnectionFactory.initializeAndroidGlobals(this, true, true, true);
+        //PeerConnectionFactory.initializeAndroidGlobals(this, true, true, true);
+        PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(this).setEnableVideoHwAcceleration(true).createInitializationOptions());
 
         //Create a new PeerConnectionFactory instance.
-        PeerConnectionFactory.Options options = new PeerConnectionFactory.Options();
-        peerConnectionFactory = new PeerConnectionFactory(options);
-
+        //PeerConnectionFactory.Options options = new PeerConnectionFactory.Options();
+        peerConnectionFactory = PeerConnectionFactory.builder().createPeerConnectionFactory();
 
         //Now create a VideoCapturer instance. Callback methods are there if you want to do something! Duh!
-        VideoCapturer videoCapturerAndroid = getVideoCapturer(new CustomCameraEventsHandler());
+        VideoCapturer videoCapturerAndroid = createVideoCapturer(new CustomCameraEventsHandler());
 
         //Create MediaConstraints - Will be useful for specifying video and audio constraints.
         audioConstraints = new MediaConstraints();
@@ -146,6 +166,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         audioSource = peerConnectionFactory.createAudioSource(audioConstraints);
         localAudioTrack = peerConnectionFactory.createAudioTrack("101", audioSource);
         localVideoView.setVisibility(View.VISIBLE);
+
+        // Start camera capture
+        videoCapturerAndroid.startCapture(1000, 1000, 30);
 
         //create a videoRenderer based on SurfaceViewRenderer instance
         localRenderer = new VideoRenderer(localVideoView);
@@ -240,8 +263,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     private void gotRemoteStream(MediaStream stream) {
         //we have remote video stream. add to the renderer.
-        final VideoTrack videoTrack = stream.videoTracks.getFirst();
-        AudioTrack audioTrack = stream.audioTracks.getFirst();
+        final VideoTrack videoTrack = stream.videoTracks.isEmpty() ? null : stream.videoTracks.get(0);
+        AudioTrack audioTrack = stream.audioTracks.isEmpty() ? null : stream.audioTracks.get(0);
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
